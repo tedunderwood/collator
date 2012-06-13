@@ -20,14 +20,16 @@ pathdictionary = filekeeping.loadpathdictionary()
 
 TabChar="\t"
 
-dice_cutoff = .6
+dice_cutoff = .5
 
 if "pairtreeroot" in pathdictionary:
     pairtree_rootpath = pathdictionary["pairtreeroot"]
 else:
-##   Hard-coding root path for development purposes, change this to your local root folder before running!
-##    pairtree_rootpath = input("What is the path to the root folder for your pairtree structure? ")
-    pairtree_rootpath = '/Users/mike/Desktop/collator/collection/'
+    ##   Hard-coding root path for development purposes, change this to your local root folder before running!
+    ##    pairtree_rootpath = input("What is the path to the root folder for your pairtree structure? ")
+    collator_directory = os.getcwd()
+    
+    pairtree_rootpath = collator_directory[:-8] + 'collection/'
 
 # Placeholder. Eventually we can put some code here that gets a list of HTids to drive
 # the process. For right now, I'm just choosing one arbitrarily as a test case.
@@ -56,17 +58,15 @@ def getbigrams(anystring):
         if idx < stringmax:
             bigram = character + anystring[idx + 1]
             bigramdex.add(bigram)
-        if idx > 0:
-            bigram = anystring[idx - 1] + character
-            bigramdex.add(bigram)
 
     return bigramdex
 
 def dicecoefficient(firstset, secondset):
     '''Defines a similarity measure between two sets, in this case of bigrams.'''
-
-    dice = (2 * len(firstset.intersection(secondset))) / (len(firstset) + len(secondset))
-    return dice
+    if (len(firstset) + len(secondset)) == 0:
+        return 0
+    else:
+        return (2 * len(firstset.intersection(secondset))) / (len(firstset) + len(secondset))
 
 for HTid in HTids_toprocess:
 
@@ -100,7 +100,8 @@ for HTid in HTids_toprocess:
             if len(line) < 5 or line.isdigit():
                 continue
             else:
-                header = line.strip('1234567890.,"\t\n')
+                header = line.strip('1234567890. ,"\t\n')
+                header = header.lower()
                 # Here it would also be nice to have a function
                 # that strips roman numerals, when they constitute
                 # a separate word, without automatically stripping
@@ -157,8 +158,8 @@ for HTid in HTids_toprocess:
 
         if matched == False:
             entrytuple = header[0], bigramdex
-            valid_headers.append(entrytuple)
             headerdict[header[0]] = (header[0], len(valid_headers))
+            valid_headers.append(entrytuple)
             # We use the current length of valid_headers to
             # establish an integer code for this header category.
 
