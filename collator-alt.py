@@ -20,7 +20,7 @@ pathdictionary = filekeeping.loadpathdictionary()
 
 TabChar="\t"
 
-dice_cutoff = .6
+dice_cutoff = .5
 
 if "pairtreeroot" in pathdictionary:
     pairtree_rootpath = pathdictionary["pairtreeroot"]
@@ -35,13 +35,8 @@ else:
 # the process. For right now, I'm just choosing one arbitrarily as a test case.
 
 ##Original sample text: the secret of fougereuse
-##HTids_toprocess = ['pst.000004048572']
-##Test file 1
-HTids_toprocess = ['pst.000004178651']
-##Test file 2
-##HTids_toprocess = ['pst.000004287971']
-##Test file 3
-##HTids_toprocess = ['pst.000004929574']
+HTids_toprocess = ['pst.000004048572']
+
 
 # This is a special alphabet to be used in the bigram index.
 alphabet = ['$', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
@@ -268,53 +263,54 @@ def segment(headersequence,pagelist):
     ## and then folds those with less than 2,000 words into the closest neighboring
     ## section (that has more than 2,000 words)
     
-    wordcount = list()
-    checking = 0
-    start = 0
-    sectcount = 0
+    print(str(sectioncodes))
     
+    wordcount = [0] * len(sectionlist)
     for idx,page in enumerate(pagelist):
-        if checking != sectioncodes[idx]:
-            wordcount.append((start,idx-1,sectcount))
-            start = idx
-            checking = sectioncodes[idx]
-            sectcount = 0
         for line in page:
             words = line.split()
-            sectcount += len(words)
-        if idx == len(pagelist) - 1:
-            wordcount.append((start,idx,sectcount))
-            
-    print(str(sectioncodes))
+            wordcount[sectioncodes[idx]] += len(words)
     
-    print(str(wordcount))
-
-    removes = set()
+    removecodes = set()
     
     for idx,section in enumerate(wordcount):
-        if section[2] < 2000:
-            removes.add((section[0],section[1]))
+        if section < 2000:
+            removecodes.add(idx)
     
-    for idx,section in enumerate(wordcount):
-        if (section[0],section[1]) in removes:
-            pagecodes = range(section[0],section[1]+1)
-            if idx < len(wordcount) - 1:
-                newcode = -1
-                for x in wordcount[idx:]:
-                    if (x[0],x[1]) not in removes:
-                        newcode = sectioncodes[x[0]]
-                        break
-            if newcode == -1:
-                newcode = lastvalidcode
+    removecodes.add(-1)
+    
+    for idx,pagecode in enumerate(sectioncodes):
+        if pagecode in removecodes:
+            fidx = -1
+            ridx = -1
+            for nidx,ncode in enumerate(sectioncodes[idx:]):
+                if ncode != pagecode and ncode not in removecodes:
+                    fcode = ncode
+                    fidx = nidx
+                    break
+                else:
+                    fcode = -1
+        
+            for nidx in range(len(sectioncodes[:idx])-1,-1,-1):
+                if sectioncodes[nidx] != pagecode and sectioncodes[nidx] not in removecodes:
+                    rcode = sectioncodes[nidx]
+                    ridx = idx - nidx
+                    break
+                else:
+                    rcode = -1
 
-            for x in pagecodes:
-                sectioncodes[x] = newcode
-        else:
-            lastvalidcode = sectioncodes[section[0]]
-                    
-    print(str(sectioncodes))
-    
-    ## Reinitialize wordcount for use with section meta-data
+            if fidx != -1 and fidx < ridx:
+                sectioncodes[idx] = fcode
+            elif ridx != -1 and ridx < fidx:
+                sectioncodes[idx] = rcode
+            elif fidx != -1:
+                sectioncodes[idx] = fcode
+            elif ridx != -1:
+                sectioncodes[idx] = rcode
+            else:
+                print("Nope")
+
+    ## Updates word counts for each section after shifting
 
     wordcount = [0] * len(sectionlist)
     for idx,page in enumerate(pagelist):
@@ -409,6 +405,7 @@ for HTid in HTids_toprocess:
 
     print(str(metadata))
     print(str(sectioncodes))
+    print(str(len(sectioncodes)))
     
     debug = False
     

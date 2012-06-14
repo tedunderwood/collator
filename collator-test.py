@@ -37,11 +37,17 @@ else:
 ##Original sample text: the secret of fougereuse
 ##HTids_toprocess = ['pst.000004048572']
 ##Test file 1
-HTids_toprocess = ['pst.000004178651']
+##HTids_toprocess = ['pst.000004178651']
 ##Test file 2
 ##HTids_toprocess = ['pst.000004287971']
 ##Test file 3
 ##HTids_toprocess = ['pst.000004929574']
+
+f = pairtree_rootpath + "htids.txt"
+with open(f, encoding='utf-8') as file:
+    filelines = file.readlines()
+
+HTids_toprocess = [x.rstrip() for x in filelines]
 
 # This is a special alphabet to be used in the bigram index.
 alphabet = ['$', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
@@ -346,6 +352,9 @@ def segment(headersequence,pagelist):
 
 for HTid in HTids_toprocess:
 
+    if HTid[0:10] != 'pst.000004':
+        continue
+
     # For each HTid, we get a path in the pairtree structure.
     # Then we read page files, and concatenate them in a list of pages
     # where each page is a list of lines.
@@ -402,13 +411,27 @@ for HTid in HTids_toprocess:
             headerdict[header] = 1
 
     headersequence = sorted(headerdict.items(), key = itemgetter(1), reverse = True)
-
+    frequencies = [x[1] for x in headersequence]
+    avg_freq = sum(frequencies) / len(frequencies)
+    
     ## Assign header codes, divide into sections, and count words in each section
 
-    sectioncodes, headercodes, metadata = segment(headersequence,pagelist)
+    if avg_freq > 2.5:
+        sectioncodes, headercodes, metadata = segment(headersequence,pagelist)
+    else:
+        sectioncodes = [0] * len(pageheaders)
+        headercodes = range(0, len(pageheaders))
+        metadata = ('', 0)
 
     print(str(metadata))
     print(str(sectioncodes))
+
+    dummy = input('Enumerate lines (y/n)? ')
+    if dummy == 'y':
+        for i in range(0, len(pageheaders)):
+            print(headercodes[i], sectioncodes[i], pageheaders[i])
+
+    dummy = input('continue? ')
     
     debug = False
     
