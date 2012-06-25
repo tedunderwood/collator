@@ -1,4 +1,5 @@
-''' Given a list of HathiTrust Volume IDs (HTids), retrieves those pagelists from
+'''
+    Given a list of HathiTrust Volume IDs (HTids), retrieves those pagelists from
     a pairtree structure.
 
     Scans the pagelists to identify running headers. Organizes those headers
@@ -10,6 +11,9 @@
     <pb> and <div> tags. The <div> divisions are only approximate, of course.
     They are intended to guide segmentation for topic modeling, not as permanent
     contributions to the curation of these documents.
+    
+    As a library, collate() should be the only function treated as public.  When
+    merged into a larger workflow, remove the HTid for loop.
 '''
 
 import filekeeping
@@ -34,14 +38,7 @@ else:
 # Placeholder. Eventually we can put some code here that gets a list of HTids to drive
 # the process. For right now, I'm just choosing one arbitrarily as a test case.
 
-##Original sample text: the secret of fougereuse
-##HTids_toprocess = ['pst.000004048572']
-##Test file 1
-HTids_toprocess = ['pst.000004178651']
-##Test file 2
-##HTids_toprocess = ['pst.000004287971']
-##Test file 3
-##HTids_toprocess = ['pst.000004929574']
+HTids_toprocess = ['pst.000004048572','pst.000004178651','pst.000004287971','pst.000004929574','pst.000004703440']
 
 # This is a special alphabet to be used in the bigram index.
 alphabet = ['$', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
@@ -75,7 +72,17 @@ def dicecoefficient(firstset, secondset):
     else:
         return (2 * len(firstset.intersection(secondset))) / (len(firstset) + len(secondset))
         
-def segment(headersequence,pagelist):
+def segment(headersequence,pagelist,pageheaders):
+    '''
+    This function accepts a list of header known header strings, ordered by frequency,
+    the full text of the document in question, and a list of page header strings in
+    the order they appear in the document.  After employing a bigram indexing stretegy
+    to remove OCR errors, divides up the text into sections by identifying repeated
+    pairs of headers (any pair that appears more than 4 times is a section).  Also
+    removes errors in division by merging any continguous group of pages that share the
+    same section number but have less than 2,000 words into the next section.
+    '''
+    
     # headerdict holds a dictionary of translation rules mapping actually-occurring
     # headers to normalized header categories. Each header category is represented
     # as a tuple containing 0) the normalized header and 1) an integer code for it.
@@ -88,11 +95,11 @@ def segment(headersequence,pagelist):
     # valid_headers stores normalized header names, paired as tuples
     # with the bigram index for each so they can be checked as possible
     # matches.
-
+    
     headerdict = {}
     valid_headers = []
     
-    for header in headersequence:
+    for idx,header in enumerate(headersequence):
         bigramdex = getbigrams(header[0])
         matched = False
 
@@ -119,8 +126,8 @@ def segment(headersequence,pagelist):
         normalized, header_code = headerdict[header]
         headercodes.append(header_code)
 
-    # Once the list of header codes has been established, run through the list
-    # and count the number of pairings (both before and after)
+    ## Once the list of header codes has been established, run through the list
+    ## and count the number of pairings (both before and after)
     
     paircounts = {}
     
@@ -136,7 +143,7 @@ def segment(headersequence,pagelist):
                 paircounts[after] = 1
 
     ## First conditional in this set checks to make sure the before/after pairs
-    ## don't match only if the loop isn't at the end of the header list
+    ## don't match only if the loop isn't at either end of the header list
                 
         if idx > 0:
             before = headercodes[idx - 1], code
@@ -155,17 +162,22 @@ def segment(headersequence,pagelist):
         if paircounts[pair] >= 4:
             validpairs[pair] = paircounts[pair]
             
-    ## Go back through the list and assign section pairs numbers.  The dicionary
+    ## Go back through the list and assign section codes to pairs of headers. The dicionary
     ## sectiondict links header pairs (stored as tuples) to section codes.  The
     ## list will be the same length as pageheaders list and indicate which section
     ## each page belongs to.  Invalid sections assigned 999 as code for correction later.
     ## Checks before and after pairings, then resolves conflict by auto-assigning to
     ## more the common of the two.  The sectionlist allows for reverse look-up (for use
-    ## in correction checks).
+    ## in metadata generation).
     
     sectioncodes = []
     sectiondict = {}
     sectionlist = []
+    
+    ## If a page's header pairing is valid (appears more than 4 times), give it a section
+    ## code. If not, assigned 999 as an error code.  If it's the first or last, assign -1
+    ## so that conflict resolution checks will automatically give it the same code as the page
+    ## second or penultimate page.
     
     for idx, code in enumerate(headercodes):
         if idx < len(headercodes) - 1:
@@ -185,9 +197,7 @@ def segment(headersequence,pagelist):
                 after = 999
         else:
             after = -1
-                
-    ## If not the first page, determine if the header pairing
-    ## is an approved pairing.  
+                  
         if idx > 0:
             s = headercodes[idx - 1], code
             r = (s[1],s[0])
@@ -209,10 +219,10 @@ def segment(headersequence,pagelist):
     ## Determine which code to assign to the page by resolving any conflicts            
         if before == after:
             add = after
-        elif before == -1 or before == 999:
-            add = after
-        elif after == -1 or after == 999:
+        elif (after == -1 or after == 999) and before != -1:
             add = before
+        elif (before == -1 or before == 999) and after != -1:
+            add = after
         elif paircounts[sectionlist[before]] > paircounts[sectionlist[after]]:
             add = before
         else:
@@ -226,7 +236,7 @@ def segment(headersequence,pagelist):
     ## are easy to fix).  Otherwise, count forward to for the next non-error code.
     ## Then compare distance between last known non-error and the next non-error.
     ## When correcting, update the last known section ID and last known index so
-    ## that there's no ned to loop bakwards to make corrections.
+    ## that there's no need to loop bakwards to make corrections.
     
     lastsection = 0
     lastknowndex = 0
@@ -273,6 +283,8 @@ def segment(headersequence,pagelist):
     start = 0
     sectcount = 0
     
+    ## Figure out continguous sections and count the worlds in them.
+    
     for idx,page in enumerate(pagelist):
         if checking != sectioncodes[idx]:
             wordcount.append((start,idx-1,sectcount))
@@ -284,88 +296,129 @@ def segment(headersequence,pagelist):
             sectcount += len(words)
         if idx == len(pagelist) - 1:
             wordcount.append((start,idx,sectcount))
-            
-    print(str(sectioncodes))
-    
-    print(str(wordcount))
 
+    ## Put section ranges of those with less than 2,000 into a set
+    ## as tuples for if in checks during correction.
+    
     removes = set()
     
     for idx,section in enumerate(wordcount):
         if section[2] < 2000:
             removes.add((section[0],section[1]))
+
+    ## Look at the word counts for each contiguous section.  If
+    ## it has been highlighted for removal, then give it the next
+    ## section's code.  If the last section needs to be removed,
+    ## give it the same code as the previous one.
     
     for idx,section in enumerate(wordcount):
         if (section[0],section[1]) in removes:
             pagecodes = range(section[0],section[1]+1)
+            newcode = -1
             if idx < len(wordcount) - 1:
-                newcode = -1
                 for x in wordcount[idx:]:
                     if (x[0],x[1]) not in removes:
                         newcode = sectioncodes[x[0]]
+                        lastvalidcode = newcode
                         break
             if newcode == -1:
                 newcode = lastvalidcode
 
             for x in pagecodes:
                 sectioncodes[x] = newcode
+            
         else:
             lastvalidcode = sectioncodes[section[0]]
-                    
-    print(str(sectioncodes))
-    
-    ## Reinitialize wordcount for use with section meta-data
 
-    wordcount = [0] * len(sectionlist)
-    for idx,page in enumerate(pagelist):
-        for line in page:
-            words = line.split()
-            wordcount[sectioncodes[idx]] += len(words)       
-       
-    ## Produces strings for each section code by doing a reverse look-up
-    ## for each header-code in the list of valid section-codes.  Currently
-    ## assumes that text title is 
+    ## This could probably be compressed but I don't want to fix what
+    ## is working.  Create a set of headerdict's values, then extracts
+    ## just the normalized names.
 
     temp = set(headerdict.values())
     headerkey = [''] * len(temp)
     for header in temp:
         headerkey[header[1]] = header[0]
+    del temp
         
     metadata = [''] * len(sectionlist)
-        
+
+    ## When preparing the metadata table, assume that the most common header
+    ## (the first appearing in headersequence, previously sorted by frequency)
+    ## is the book's title.
+    
     for i, section in enumerate(sectionlist):
         if headersequence[0][0] == headerkey[section[0]]:
-            metadata[i] = (headerkey[section[1]],wordcount[i])
-            print(str(i) + ": " + headerkey[section[1]] + " " + str(wordcount[i]))
+            metadata[i] = headerkey[section[1]]
         else:
-            metadata[i] = (headerkey[section[0]],wordcount[i])
-            print(str(i) + ": " + headerkey[section[0]] + " " + str(wordcount[i]))
+            metadata[i] = headerkey[section[0]]
             
-    return sectioncodes, headercodes, metadata
+    ## Return sectioncodes so div's can be generated using metadata.  Return
+    ## headerdict so pre-normalized section headers can be identified and removed
+    ## during collation.
+            
+    return sectioncodes, headerdict, metadata
 
-
-for HTid in HTids_toprocess:
-
-    # For each HTid, we get a path in the pairtree structure.
-    # Then we read page files, and concatenate them in a list of pages
-    # where each page is a list of lines.
+def correctsequence(sectioncodes,metadata,pagelist):
+    '''
+    After sections have been determined, the codes need to be adjusted
+    so that they appear in the correct sequence.  IE, [2,3,1,0,4,7,8]
+    needs to be corrected so that it is [0,1,2,3,4,5].  This function
+    preserves the order of pages and section assignments.  It also returns
+    a metadata table with section names and word counts.  It has been separated
+    from the segmentation function for debug/developmental purposes, but the
+    two are meant to be run together on texts to completely prepare them for
+    the final collation loop.
+    '''
     
-    path, postfix = filekeeping.pairtreepath(HTid,pairtree_rootpath)
-    pagepath = path + postfix + "/" + postfix + "/"
-    pagefiles = os.listdir(pagepath)
-    pagelist = []
+    fixtable = []
+    fixedmeta = []
+    last = sectioncodes[0]
+    change = 0
+    start = 0
 
+    ## Look through the list of section codes for each page and change
+    ## them to a normal iteration beginning with 0.  If the current page
+    ## has a new code, then increase the corrected section code and
+    ## make a note of where the break so that the metadata table can be
+    ## updated to reflect the new section breaks.
     
-    for f in pagefiles:
-        if f[0] == ".":
-            continue
-        with open(pagepath + f, encoding='utf-8') as file:
-            linelist = file.readlines()
-            pagelist.append(linelist)
+    for idx, page in enumerate(sectioncodes):
+        if page != last:
+            change += 1
+            fixtable.append((last,start,idx))
+            start = idx + 1
+            last = page
+        if idx == len(sectioncodes) - 1:
+            fixtable.append((last,start,idx))
+        sectioncodes[idx] = change
 
-    # We're going to keep pageheaders rigorously aligned with pagelist,
-    # so every page gets a 'header,' even if blank.
+    ## When preparing the full metadata table, include the section
+    ## name as well as a word count (initialized at zero) and a
+    ## tuple that notes the bounds of that section for use in placing
+    ## div's without needing a loop to "re-discover" them later.
+    for code in fixtable:
+        fixedmeta.append([metadata[code[0]],0,(code[1],code[2])])
     
+    for idx,page in enumerate(pagelist):
+        for line in page:
+            words = line.split()
+            fixedmeta[sectioncodes[idx]][1] += len(words)
+            
+    ## The metadata is supposed to be a tuple, so better correct that
+    ## before it gets returned!
+            
+    for idx,code in enumerate(fixedmeta):
+        fixedmeta[idx] = tuple(code)
+    
+    return sectioncodes, fixedmeta
+
+def collate(pagelist):
+    '''
+    Accepts a list of pages (each of which is a list of lines) and reads through them,
+    discovering headers (if present) and guessing section divisions based on pairing
+    patterns.  Returns the prepared text, ready for writing to disk (or analysis by
+    functions from other libraries).
+    '''
     pageheaders = []
     for page in pagelist:
         header = ""
@@ -403,15 +456,132 @@ for HTid in HTids_toprocess:
 
     headersequence = sorted(headerdict.items(), key = itemgetter(1), reverse = True)
 
+    ## Check to see if the book actually has running headers
+    frequencies = [x[1] for x in headersequence]
+    avg_freq = sum(frequencies) / len(frequencies)
+
+    ## SECTION ASSIGNMENT / SEGMENTATION & CORRECTION
     ## Assign header codes, divide into sections, and count words in each section
+    ## These two functions can be skipped for books that don't seem to have running
+    ## headers, but a dummy divplace and a dummy remove will still need to be created
+    ## for the collation loop.
 
-    sectioncodes, headercodes, metadata = segment(headersequence,pagelist)
+    if avg_freq > 2.5:
+        sectioncodes, headerdict, metadata = segment(headersequence,pagelist,pageheaders)
+        sectioncodes,metadata = correctsequence(sectioncodes, metadata,pagelist)
+    else:
+        sectioncodes = [0] * len(pageheaders)
+        
+    
+    ## Now that everything has been segmented, and the metadata table is finished,
+    ## it's time to insert the metadata.
+    ##
+    ## First, make a dictionary where keys are the page a new <div> should be place.
+    ## The values are tuples with: page where section ends, section name, and section
+    ## word count, and section #.  If the file doesn't have headers, then create a
+    ## dummy entry that will wrap the text in a single <div>.
+    
+    divplace = {}
+    
+    if avg_freq > 2.5:
+        for idx,section in enumerate(metadata):
+            divplace[section[2][0]] = (section[2][1],section[0],section[1],idx)
+    else:
+        wc = 0
+        for page in pagelist:
+            for line in page:
+                words = line.split()
+                wc += len(words)
+        divplace[0] = (len(pageheaders) - 1,'Fulltext',wc,0)
+        
+    ## Second, use the headerdict to create a set of all different forms of
+    ## the valid headers to use when remove running headers from all pages.
+    ## Additionally, add the most frequent header, which is presumed to be
+    ## the title and so has been excluded from the section metadata table.
+    ## If the file doesn't have headers, then leave as an empty set.
+    
+    remove = set()
+    
+    if avg_freq > 2.5:
+        remove.add(headersequence[0][0])
+    
+        for item in metadata:
+            remove.add(item[0])
+        
+        for key, value in headerdict.items():
+            if value[0] in remove:
+                remove.add(key)    
 
-    print(str(metadata))
-    print(str(sectioncodes))
+    ## COLLATION LOOP        
+    ## Now go through the text, page by page.  If the page number matches that
+    ## one of the keys in the division dictionary, then put an opening <div>
+    ## with the relevant meta-data at the top of the page.  Then skip to
+    ## the page that marks the last of that same section and put a closing
+    ## </div> at the bottom.  For all pages, check to make the last line is
+    ## non-empty (and if so, remove it) then append <pb> on it's own line.
+    ## Also, check to see if the page's first line (without numbers and 
+    ## punctation) matches one of the known forms of a valid header.  If so,
+    ## then delete that line.
+    ##
+    ## NOTE: The header removal check first checks to see if a line is only
+    ## numbers (ie, OCR placed the page number on a line above the header).
+    ## If so, remove line with page number and check 2nd line for header.
+    ## Without this check, some running headers will not be removed.
     
-    debug = False
+    for idx,page in enumerate(pagelist):
+        if len(page) > 0:                    
+            page[-1] = page[-1].strip()
+            if len(page[-1]) > 0:
+                page[-1] += "\n"
+            else:
+                del page[-1]
+            page.append("<pb>\n")
+            header = page[0]
+            header = header.rstrip('\n')
+            if header.isnumeric():
+                del pagelist[idx][0]
+                header = pagelist[idx][0]
+            header = header.strip('0123456789.,!@#$%^&*()[]<> \n')
+            header = header.lower()
+
+            if header in remove:
+                del pagelist[idx][0]
+        if idx in divplace:
+            page.insert(0,"<div id=\"" + divplace[idx][1] + "\" code=\"" + str(divplace[idx][3]) + "\" wordcount=\"" + str(divplace[idx][2]) + "\">\n")
+            pagelist[divplace[idx][0]].append("</div>\n")
     
-    if debug:
-        for i,x in enumerate(sectioncodes):
-            print(str(i + 1) + " " + str(x))
+    return pagelist
+    
+for HTid in HTids_toprocess:
+
+    # For each HTid, we get a path in the pairtree structure.
+    # Then we read page files, and concatenate them in a list of pages
+    # where each page is a list of lines.
+    
+    path, postfix = filekeeping.pairtreepath(HTid,pairtree_rootpath)
+    pagepath = path + postfix + "/" + postfix + "/"
+    pagefiles = os.listdir(pagepath)
+    pagelist = []
+
+    
+    for f in pagefiles:
+        if f[0] == ".":
+            continue
+        with open(pagepath + f, encoding='utf-8') as file:
+            linelist = file.readlines()
+            pagelist.append(linelist)
+
+    # We're going to keep pageheaders rigorously aligned with pagelist,
+    # so every page gets a 'header,' even if blank.
+    
+    pagelist = collate(pagelist)
+        
+    ## This part will need to be changed or re-written depending on how this is used.
+    ## Right now, it just dumps the text into the collator directory.  It might be
+    ## It might make more sense to make this it's own function.
+
+    with open(collator_directory + "/" + HTid[4:] + ".txt",mode='w',encoding='utf-8') as file:
+        for page in pagelist:
+            for line in page:
+                file.write(line)
+            
